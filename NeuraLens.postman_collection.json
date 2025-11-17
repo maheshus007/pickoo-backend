@@ -1,0 +1,234 @@
+{
+  "info": {
+    "_postman_id": "b6e2e5fc-6d9d-4e2e-9abc-neuralens-backend",
+    "name": "NeuraLens FastAPI Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for NeuraLens AI backend endpoints. Includes health, tools, processing, and subscription management."
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Signup (Email)",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"test{{timestamp}}@example.com\",\n  \"password\": \"Passw0rd!\"\n}"},
+            "url": {"raw": "{{baseUrl}}/auth/signup", "host": ["{{baseUrl}}"], "path": ["auth","signup"]}
+          },
+          "event": [ {"listen": "test", "script": {"exec": [
+            "pm.test('Signup returns token', function(){",
+            "  pm.response.to.have.status(200);",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.access_token).to.be.a('string');",
+            "  pm.environment.set('token', j.access_token);",
+            "  pm.environment.set('userId', j.user_id);",
+            "});"
+          ], "type": "text/javascript"}} ]
+        },
+        {
+          "name": "Login (Email)",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"{{loginEmail}}\",\n  \"password\": \"{{loginPassword}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth","login"]}
+          },
+          "event": [ {"listen": "test", "script": {"exec": [
+            "pm.test('Login returns token', function(){",
+            "  pm.response.to.have.status(200);",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.access_token).to.be.a('string');",
+            "  pm.environment.set('token', j.access_token);",
+            "  pm.environment.set('userId', j.user_id);",
+            "});"
+          ], "type": "text/javascript"}} ]
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {"raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth","me"]}
+          },
+          "event": [ {"listen": "test", "script": {"exec": [
+            "pm.test('Me returns user info', function(){",
+            "  pm.response.to.have.status(200);",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.id).to.eql(pm.environment.get('userId'));",
+            "});"
+          ], "type": "text/javascript"}} ]
+        },
+        {
+          "name": "Plan Upgrade",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Content-Type", "value": "application/json"} ],
+            "body": {"mode": "raw", "raw": "{\n  \"code\": \"FW\"\n}"},
+            "url": {"raw": "{{baseUrl}}/plan/upgrade", "host": ["{{baseUrl}}"], "path": ["plan","upgrade"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql('ok');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tools",
+      "item": [
+        {
+          "name": "List Tools",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{baseUrl}}/tools", "host": ["{{baseUrl}}"], "path": ["tools"]}
+          },
+          "event": [
+            {"listen": "test", "script": {"exec": [
+              "pm.test('Returns tools array', ()=> {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.tools).to.be.an('array');",
+              "  pm.expect(data.tools.length).to.be.greaterThan(0);",
+              "});"
+            ], "type": "text/javascript"}}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Processing (Generic /process)",
+      "item": [
+        {
+          "name": "Process - Auto Enhance",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {"key": "file", "type": "file", "src": "{{sampleImagePath}}"}
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/process?tool_id=auto_enhance",
+              "host": ["{{baseUrl}}"],
+              "path": ["process"],
+              "query": [{"key": "tool_id", "value": "auto_enhance"}]
+            }
+          },
+          "event": [
+            {"listen": "test", "script": {"exec": [
+              "pm.test('Processed image returned', () => {",
+              "  pm.response.to.have.status(200);",
+              "  const j = pm.response.json();",
+              "  pm.expect(j.tool).to.eql('auto_enhance');",
+              "  pm.expect(j.image_base64).to.be.a('string');",
+              "});"
+            ], "type": "text/javascript"}}
+          ]
+        },
+        {
+          "name": "Process - Background Removal",
+          "request": {
+            "method": "POST",
+            "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]},
+            "url": {"raw": "{{baseUrl}}/process?tool_id=background_removal", "host": ["{{baseUrl}}"], "path": ["process"], "query": [{"key": "tool_id", "value": "background_removal"}]}
+          }
+        },
+        {
+          "name": "Process - Super Resolution",
+          "request": {
+            "method": "POST",
+            "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]},
+            "url": {"raw": "{{baseUrl}}/process?tool_id=super_resolution", "host": ["{{baseUrl}}"], "path": ["process"], "query": [{"key": "tool_id", "value": "super_resolution"}]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Processing (Legacy Individual Endpoints)",
+      "item": [
+        {"name": "Enhance (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/enhance", "host": ["{{baseUrl}}"], "path": ["enhance"]}}},
+        {"name": "Remove BG (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/remove_bg", "host": ["{{baseUrl}}"], "path": ["remove_bg"]}}},
+        {"name": "Face Retouch (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/face_retouch", "host": ["{{baseUrl}}"], "path": ["face_retouch"]}}},
+        {"name": "Object Eraser (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/erase_object", "host": ["{{baseUrl}}"], "path": ["erase_object"]}}},
+        {"name": "Sky Replace (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/sky_replace", "host": ["{{baseUrl}}"], "path": ["sky_replace"]}}},
+        {"name": "Super Res (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/super_res", "host": ["{{baseUrl}}"], "path": ["super_res"]}}},
+        {"name": "Style Transfer (Legacy)", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": "{{sampleImagePath}}"}]}, "url": {"raw": "{{baseUrl}}/style_transfer", "host": ["{{baseUrl}}"], "path": ["style_transfer"]}}}
+      ]
+    },
+    {
+      "name": "Subscription",
+      "item": [
+        {
+          "name": "Get Status",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/subscription/status/{{userId}}", "host": ["{{baseUrl}}"], "path": ["subscription", "status", "{{userId}}"]}}
+        },
+        {
+          "name": "Purchase Plan",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"user_id\": \"{{userId}}\",\n  \"plan_id\": \"day25\"\n}"},
+            "url": {"raw": "{{baseUrl}}/subscription/purchase", "host": ["{{baseUrl}}"], "path": ["subscription", "purchase"]}
+          }
+        },
+        {
+          "name": "Record Usage",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"user_id\": \"{{userId}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/subscription/record_usage", "host": ["{{baseUrl}}"], "path": ["subscription", "record_usage"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Debug",
+      "item": [
+        {"name": "Settings", "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/debug/settings", "host": ["{{baseUrl}}"], "path": ["debug","settings"]}}}
+      ]
+    }
+  ],
+  "event": [],
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:8000"},
+    {"key": "sampleImagePath", "value": "C:/path/to/sample.jpg"},
+    {"key": "loginEmail", "value": "tester@example.com"},
+    {"key": "loginPassword", "value": "Passw0rd!"},
+    {"key": "token", "value": ""},
+    {"key": "userId", "value": ""}
+  ]
+}
