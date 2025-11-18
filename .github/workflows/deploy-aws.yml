@@ -172,6 +172,19 @@ jobs:
         aws sts get-caller-identity
         echo "✅ AWS credentials valid"
 
+    - name: Verify EB_S3_BUCKET secret is set
+      run: |
+        if [ -z "${{ secrets.EB_S3_BUCKET }}" ]; then
+          echo "❌ ERROR: EB_S3_BUCKET secret is NOT set!"
+          echo "Please add EB_S3_BUCKET secret in:"
+          echo "https://github.com/${{ github.repository }}/settings/secrets/actions"
+          echo ""
+          echo "Example value: pickoo-backend-deployments"
+          exit 1
+        fi
+        echo "✅ EB_S3_BUCKET secret is set"
+        echo "Note: Actual bucket name is hidden in logs for security"
+
     - name: Ensure S3 bucket exists
       run: |
         BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
@@ -288,10 +301,17 @@ jobs:
         
         echo "Creating application version: $VERSION_LABEL"
         echo "Application: ${{ env.EB_APPLICATION_NAME }}"
-        echo "S3 Bucket: $BUCKET_NAME"
+        echo "S3 Bucket: $BUCKET_NAME (masked for security)"
+        echo "S3 Bucket length: ${#BUCKET_NAME}"
         echo "S3 Key: $S3_KEY"
         echo "Region: ${{ env.AWS_REGION }}"
         echo "Timestamp: ${{ steps.timestamp.outputs.timestamp }}"
+        
+        if [ -z "$BUCKET_NAME" ]; then
+          echo "❌ ERROR: BUCKET_NAME is empty!"
+          echo "EB_S3_BUCKET secret value: '${{ secrets.EB_S3_BUCKET }}'"
+          exit 1
+        fi
         
         aws elasticbeanstalk create-application-version \
           --application-name ${{ env.EB_APPLICATION_NAME }} \
