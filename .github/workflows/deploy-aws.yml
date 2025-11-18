@@ -168,6 +168,23 @@ jobs:
         aws s3 cp deploy-${{ steps.timestamp.outputs.timestamp }}.zip \
           s3://${{ secrets.EB_S3_BUCKET }}/pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip
 
+    - name: Check if Elastic Beanstalk application exists
+      id: check-app
+      run: |
+        if aws elasticbeanstalk describe-applications --application-names ${{ env.EB_APPLICATION_NAME }} 2>/dev/null; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+      continue-on-error: true
+
+    - name: Create Elastic Beanstalk application if not exists
+      if: steps.check-app.outputs.exists == 'false'
+      run: |
+        aws elasticbeanstalk create-application \
+          --application-name ${{ env.EB_APPLICATION_NAME }} \
+          --description "Pickoo AI Photo Editor Backend API"
+
     - name: Create Elastic Beanstalk application version
       run: |
         aws elasticbeanstalk create-application-version \
