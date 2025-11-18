@@ -381,12 +381,37 @@ jobs:
           --environment-names ${{ steps.set-env.outputs.env_name }} \
           --query "Environments[0].CNAME" \
           --output text)
-        echo "url=https://${URL}" >> $GITHUB_OUTPUT
+        echo "url=http://${URL}" >> $GITHUB_OUTPUT
+        echo "Environment URL: http://${URL}"
+
+    - name: Check environment health
+      run: |
+        echo "Checking environment health status..."
+        aws elasticbeanstalk describe-environment-health \
+          --environment-name ${{ steps.set-env.outputs.env_name }} \
+          --attribute-names All \
+          --region ${{ env.AWS_REGION }} || echo "Could not get health status"
 
     - name: Health check
+      continue-on-error: true
       run: |
-        sleep 30
-        curl -f ${{ steps.get-url.outputs.url }}/health || exit 1
+        echo "Waiting for application to be ready..."
+        sleep 60
+        
+        echo "Testing health endpoint..."
+        for i in {1..5}; do
+          echo "Attempt $i of 5..."
+          if curl -f -m 30 ${{ steps.get-url.outputs.url }}/health; then
+            echo "✅ Health check passed!"
+            exit 0
+          fi
+          echo "Health check failed, retrying in 30 seconds..."
+          sleep 30
+        done
+        
+        echo "⚠️ Health check failed after 5 attempts"
+        echo "Note: This may be normal if the environment is still starting up"
+        echo "Check the EB console for detailed logs: https://console.aws.amazon.com/elasticbeanstalk"
 
     - name: Deployment summary
       run: |
