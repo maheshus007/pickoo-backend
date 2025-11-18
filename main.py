@@ -1,8 +1,9 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Response, Body
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Optional
 from PIL import Image, ImageFile, ImageOps
 from io import BytesIO
 import traceback
@@ -15,6 +16,13 @@ from schemas import (
     SubscriptionStatus,
     SubscriptionPurchaseRequest,
     RecordUsageRequest,
+    CreateCheckoutRequest,
+    CheckoutResponse,
+    PaymentHistoryResponse,
+    CurrencyResponse,
+    WebhookResponse,
+    TransactionRecord,
+    TransactionListResponse,
 )
 from utils import pil_to_base64
 import image_processing as proc
@@ -25,6 +33,12 @@ from subscription import (
     record_usage,
     quota_alert_pending,
     clear_quota_alert,
+    verify_google_play_purchase,
+)
+from transactions import (
+    get_user_transactions,
+    get_transaction_by_id,
+    get_revenue_stats,
 )
 from auth import (
     get_db,
@@ -44,7 +58,7 @@ from config import settings
 
 APP_VERSION = "0.1.0"
 
-app = FastAPI(title="NeuraLens AI Backend", version=APP_VERSION)
+app = FastAPI(title="Pickoo AI Backend", version=APP_VERSION)
 
 # CORS: allow local Flutter web or emulator origins; adjust for production.
 app.add_middleware(
@@ -222,8 +236,20 @@ async def process(
     """
     return await _process(tool_id, file, raw=raw)
 
+@app.get("/subscription/status", response_model=SubscriptionStatus)
+async def subscription_status(user_id: str = Query(..., description="User ID to get subscription status for"), db=Depends(get_db)):
+    """
+    Get subscription status for a user using query parameter.
+    Example: /subscription/status?user_id=123
+    """
+    return await get_subscription_status(user_id, db)
+
 @app.get("/subscription/status/{user_id}", response_model=SubscriptionStatus)
-async def subscription_status(user_id: str, db=Depends(get_db)):
+async def subscription_status_path(user_id: str, db=Depends(get_db)):
+    """
+    Get subscription status for a user using path parameter.
+    Example: /subscription/status/123
+    """
     return await get_subscription_status(user_id, db)
 
 @app.post("/subscription/purchase", response_model=SubscriptionStatus)
@@ -259,6 +285,27 @@ async def subscription_quota_alert(user_id: str, db=Depends(get_db)):
 async def subscription_quota_alert_clear(user_id: str, db=Depends(get_db)):
     await clear_quota_alert(user_id, db)
     return {"user_id": user_id, "cleared": True}
+
+@app.post("/subscription/verify-google-play")
+async def subscription_verify_google_play(
+    user_id: str = Body(...),
+    purchase_token: str = Body(...),
+    product_id: str = Body(...),
+    db=Depends(get_db)
+):
+    """
+    Verify a Google Play in-app purchase and activate subscription.
+    
+    In production, this should verify the purchase_token with Google Play Developer API
+    before activating the subscription to prevent fraud.
+    """
+    result = await verify_google_play_purchase(
+        user_id=user_id,
+        product_id=product_id,
+        purchase_token=purchase_token,
+        db=db
+    )
+    return result
 
 # Generic processor to reduce duplication.
 async def _process(tool_id: str, file: UploadFile, raw: bool = False, response: Response | None = None):
@@ -357,5 +404,267 @@ async def super_res(response: Response, file: UploadFile = File(...)):
 @app.post("/style_transfer", response_model=ImageResponse)
 async def style_transfer(response: Response, file: UploadFile = File(...)):
     return await _process("style_transfer", file, response=response)
+
+# ---------------- PAYMENT ENDPOINTS -----------------
+from payment import payment_service
+from fastapi import Request as FastAPIRequest
+import requests
+
+@app.post("/payment/create-checkout", response_model=CheckoutResponse)
+async def create_checkout_session(req: CreateCheckoutRequest):
+    """
+    Create a Stripe Checkout session for subscription purchase.
+    Automatically detects currency based on country code.
+    """
+    try:
+        # Get subscription plan details
+        from subscription import PLANS
+        
+        plan = PLANS.get(req.plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail=f"Plan {req.plan_id} not found")
+        
+        # Get currency for country
+        currency = payment_service.get_currency_for_country(req.country_code)
+        
+        # Create checkout session
+        result = await payment_service.create_checkout_session(
+            user_id=req.user_id,
+            plan_id=req.plan_id,
+            plan_name=plan["name"],
+            base_price_usd=plan["price"],
+            currency=currency,
+            success_url=req.success_url,
+            cancel_url=req.cancel_url,
+        )
+        
+        return CheckoutResponse(**result)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/payment/webhook", response_model=WebhookResponse)
+async def payment_webhook(request: FastAPIRequest):
+    """
+    Handle Stripe webhook events for payment confirmations.
+    """
+    try:
+        payload = await request.body()
+        signature = request.headers.get("stripe-signature")
+        
+        if not signature:
+            raise HTTPException(status_code=400, detail="Missing stripe-signature header")
+        
+        result = await payment_service.handle_webhook_event(payload, signature)
+        
+        return WebhookResponse(
+            status="success",
+            message=f"Processed event: {result.get('event_type')}"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/payment/history/{user_id}", response_model=PaymentHistoryResponse)
+async def get_payment_history(user_id: str, current=Depends(get_current_user)):
+    """
+    Get payment history for a user.
+    """
+    try:
+        # Verify user can only access their own payment history
+        if str(current["_id"]) != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        payments = await payment_service.get_user_payments(user_id)
+        
+        return PaymentHistoryResponse(
+            payments=payments,
+            total_count=len(payments)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/payment/detect-currency", response_model=CurrencyResponse)
+async def detect_currency(request: FastAPIRequest):
+    """
+    Detect user's currency based on IP geolocation.
+    Uses ipapi.co free API for country detection.
+    """
+    try:
+        # Try to get country from IP
+        client_ip = request.client.host
+        
+        # Skip localhost/private IPs
+        if client_ip in ["127.0.0.1", "localhost"] or client_ip.startswith("192.168."):
+            country_code = "US"
+        else:
+            # Use ipapi.co for geolocation (free tier: 1000 requests/day)
+            try:
+                geo_response = requests.get(f"https://ipapi.co/{client_ip}/json/", timeout=2)
+                geo_data = geo_response.json()
+                country_code = geo_data.get("country_code", "US")
+            except:
+                # Fallback to US if geolocation fails
+                country_code = "US"
+        
+        currency = payment_service.get_currency_for_country(country_code)
+        
+        # Currency symbols mapping
+        currency_symbols = {
+            "usd": "$", "eur": "€", "gbp": "£", "cad": "CA$", "aud": "A$",
+            "inr": "₹", "jpy": "¥", "cny": "¥", "sgd": "S$", "hkd": "HK$",
+            "nzd": "NZ$", "chf": "CHF", "sek": "kr", "nok": "kr", "dkk": "kr",
+            "mxn": "MX$", "brl": "R$", "zar": "R", "aed": "AED", "sar": "SAR",
+            "krw": "₩", "thb": "฿", "myr": "RM", "php": "₱", "idr": "Rp",
+        }
+        
+        return CurrencyResponse(
+            country_code=country_code,
+            currency=currency,
+            symbol=currency_symbols.get(currency, "$")
+        )
+        
+    except Exception as e:
+        # Return USD as safe fallback
+        return CurrencyResponse(
+            country_code="US",
+            currency="usd",
+            symbol="$"
+        )
+
+
+# ==========================================
+# Transaction Tracking Endpoints
+# ==========================================
+
+@app.get("/transactions/user/{user_id}", response_model=TransactionListResponse)
+async def get_transactions_by_user(
+    user_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db=Depends(get_db)
+):
+    """
+    Get all transactions for a specific user with pagination.
+    
+    This endpoint is useful for:
+    - Showing user purchase history
+    - Building transaction analytics dashboards
+    - Auditing and reporting
+    """
+    skip = (page - 1) * page_size
+    transactions = await get_user_transactions(user_id, db, limit=page_size, skip=skip)
+    
+    # Get total count
+    trans_coll = db.get_collection("transactions")
+    total_count = await trans_coll.count_documents({"user_id": user_id})
+    
+    return TransactionListResponse(
+        transactions=transactions,
+        total_count=total_count,
+        page=page,
+        page_size=page_size
+    )
+
+
+@app.get("/transactions/{transaction_id}", response_model=TransactionRecord)
+async def get_transaction_details(
+    transaction_id: str,
+    db=Depends(get_db)
+):
+    """
+    Get details of a specific transaction by ID.
+    
+    Useful for:
+    - Transaction lookup
+    - Debugging payment issues
+    - Customer support
+    """
+    transaction = await get_transaction_by_id(transaction_id, db)
+    
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    return TransactionRecord(**transaction)
+
+
+@app.get("/transactions/stats/revenue")
+async def get_revenue_statistics(
+    start_date: Optional[str] = Query(None, description="ISO format: 2025-01-01T00:00:00Z"),
+    end_date: Optional[str] = Query(None, description="ISO format: 2025-12-31T23:59:59Z"),
+    db=Depends(get_db)
+):
+    """
+    Get revenue statistics for a date range.
+    
+    Returns:
+    - Total transactions
+    - Total revenue in USD
+    - Average transaction value
+    - Currencies used
+    - Payment methods used
+    
+    Useful for:
+    - Revenue reporting
+    - Business analytics
+    - Financial dashboards
+    """
+    from datetime import datetime
+    
+    start_dt = datetime.fromisoformat(start_date.replace("Z", "")) if start_date else None
+    end_dt = datetime.fromisoformat(end_date.replace("Z", "")) if end_date else None
+    
+    stats = await get_revenue_stats(db, start_date=start_dt, end_date=end_dt)
+    
+    return stats
+
+
+@app.get("/transactions/list/all", response_model=TransactionListResponse)
+async def get_all_transactions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    status: Optional[str] = Query(None, description="Filter by status: pending, completed, failed, refunded"),
+    payment_method: Optional[str] = Query(None, description="Filter by payment method: google_play, app_store, stripe"),
+    db=Depends(get_db)
+):
+    """
+    Get all transactions with filtering and pagination.
+    
+    Admin endpoint for:
+    - Viewing all transactions across users
+    - Filtering by status or payment method
+    - Building admin dashboards
+    - Exporting transaction data
+    """
+    trans_coll = db.get_collection("transactions")
+    
+    # Build query filter
+    query = {}
+    if status:
+        query["status"] = status
+    if payment_method:
+        query["payment_method"] = payment_method
+    
+    # Get paginated results
+    skip = (page - 1) * page_size
+    cursor = trans_coll.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+    transactions = await cursor.to_list(length=page_size)
+    
+    # Remove MongoDB _id field
+    for trans in transactions:
+        trans.pop("_id", None)
+    
+    # Get total count
+    total_count = await trans_coll.count_documents(query)
+    
+    return TransactionListResponse(
+        transactions=transactions,
+        total_count=total_count,
+        page=page,
+        page_size=page_size
+    )
 
 # Run with: uvicorn main:app --reload --port 8000

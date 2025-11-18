@@ -1,4 +1,4 @@
-"""Authentication & user management module for NeuraLens.
+"""Authentication & user management module for Pickoo.
 Provides:
   - Mongo connection (motor)
   - User creation & lookup
@@ -66,10 +66,12 @@ async def create_user(db, *, email: str | None, mobile: str | None, password: st
         "plan_code": None,
         "plan_expires_at": None,
         "quota_alerted": False,  # tracks if user has seen quota exhaustion tile
-        # Subscription usage persistence fields (fallback to free plan if plan not purchased)
-        "subscription_plan_id": None,  # e.g. 'free', 'day25', etc.
-        "subscription_purchased_at": None,
+        # Subscription usage persistence fields (all stored in MongoDB)
+        "subscription_plan_id": "free",  # Default to free plan
+        "subscription_purchased_at": datetime.now(timezone.utc),
+        "subscription_expires_at": None,  # Free plan never expires
         "subscription_used_images": 0,
+        "subscription_status_code": "F",  # F = Free tier
     }
     if password:
         doc["password_hash"] = hash_password(password)
@@ -101,7 +103,7 @@ def create_access_token(user_id: str) -> str:
         "sub": user_id,
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_exp_seconds,
-        "iss": "neuralens"
+        "iss": "pickoo"
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 

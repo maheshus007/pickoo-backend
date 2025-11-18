@@ -1,4 +1,4 @@
-"""Placeholder image processing functions for NeuraLens AI backend.
+"""Placeholder image processing functions for Pickoo AI backend.
 Each function accepts a Pillow Image and returns a processed Pillow Image.
 For production replace these stubs with real ML inference (ONNX, Torch, etc.).
 """

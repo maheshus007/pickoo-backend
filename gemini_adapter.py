@@ -22,7 +22,7 @@ from requests.exceptions import SSLError as RequestsSSLError
 
 # Map internal tool ids to Gemini API endpoints
 # Using generateContent endpoint with image and text prompts
-# Model name is read from settings.gemini_model (configurable via NEURALENS_GEMINI_MODEL)
+# Model name is read from settings.gemini_model (configurable via PICKOO_GEMINI_MODEL)
 _ENDPOINT_MAP = {
     "auto_enhance": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
     "background_removal": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
@@ -360,7 +360,7 @@ def process_external(tool_id: str, img: Image.Image) -> Tuple[Image.Image, int]:
                 
         except RequestsSSLError as e:
             last_exc = GeminiProcessingError(
-                f"SSL certificate verification failed: {e}. If this is a trusted corporate proxy or dev environment, set NEURALENS_GEMINI_VERIFY_SSL=false to bypass (NOT recommended for production)."
+                f"SSL certificate verification failed: {e}. If this is a trusted corporate proxy or dev environment, set PICKOO_GEMINI_VERIFY_SSL=false to bypass (NOT recommended for production)."
             )
         except requests.RequestException as e:
             last_exc = e
