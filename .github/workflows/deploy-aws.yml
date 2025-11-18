@@ -163,6 +163,12 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
+    - name: Verify AWS credentials
+      run: |
+        echo "Verifying AWS credentials..."
+        aws sts get-caller-identity
+        echo "✅ AWS credentials valid"
+
     - name: Upload to S3
       run: |
         aws s3 cp deploy-${{ steps.timestamp.outputs.timestamp }}.zip \
@@ -171,27 +177,44 @@ jobs:
     - name: Check if Elastic Beanstalk application exists
       id: check-app
       run: |
-        if aws elasticbeanstalk describe-applications --application-names ${{ env.EB_APPLICATION_NAME }} 2>/dev/null; then
+        echo "Checking if application exists..."
+        if aws elasticbeanstalk describe-applications --application-names ${{ env.EB_APPLICATION_NAME }} 2>&1 | grep -q "ApplicationName"; then
+          echo "✅ Application exists"
           echo "exists=true" >> $GITHUB_OUTPUT
         else
+          echo "⚠️ Application does not exist, will create"
           echo "exists=false" >> $GITHUB_OUTPUT
         fi
-      continue-on-error: true
 
     - name: Create Elastic Beanstalk application if not exists
       if: steps.check-app.outputs.exists == 'false'
       run: |
+        echo "Creating EB application: ${{ env.EB_APPLICATION_NAME }}"
         aws elasticbeanstalk create-application \
           --application-name ${{ env.EB_APPLICATION_NAME }} \
           --description "Pickoo AI Photo Editor Backend API"
+        echo "✅ Application created successfully"
+
+    - name: Verify S3 file exists
+      run: |
+        echo "Verifying S3 file..."
+        aws s3 ls s3://${{ secrets.EB_S3_BUCKET }}/pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip
+        echo "✅ S3 file exists"
 
     - name: Create Elastic Beanstalk application version
       run: |
+        echo "Creating application version: v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }}"
+        echo "S3 Bucket: ${{ secrets.EB_S3_BUCKET }}"
+        echo "S3 Key: pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        
         aws elasticbeanstalk create-application-version \
           --application-name ${{ env.EB_APPLICATION_NAME }} \
           --version-label v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }} \
           --source-bundle S3Bucket="${{ secrets.EB_S3_BUCKET }}",S3Key="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip" \
-          --description "Deployment from GitHub Actions - Commit: ${{ github.sha }}"
+          --description "Deployment from GitHub Actions - Commit: ${{ github.sha }}" \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "✅ Application version created successfully"
 
     - name: Deploy to Elastic Beanstalk
       run: |

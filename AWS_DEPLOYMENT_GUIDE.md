@@ -85,6 +85,44 @@ aws s3 mb s3://pickoo-backend-deployments --region us-east-1
 
 10. **Save the environment name**: `pickoo-backend-env`
 
+### Step 3b: Create Staging Environment (Optional but Recommended)
+
+For the develop branch, create a separate staging environment:
+
+#### Using AWS Console:
+
+1. Go to **Elastic Beanstalk** → **pickoo-backend** application
+2. Click **Create a new environment**
+3. Select **Web server environment**
+4. **Environment information:**
+   - Environment name: `pickoo-backend-staging`
+   - Domain: `pickoo-backend-staging` (or your choice)
+5. **Platform**: Same as production (Python 3.12)
+6. **Application code**: Sample application
+7. **Configuration**: 
+   - Use same settings as production OR
+   - Use smaller instance type (t3.micro) to save costs
+8. **Environment properties**: Same as production (can use same MongoDB database or separate staging DB)
+9. **Create environment**
+
+#### Using AWS CLI:
+
+```bash
+aws elasticbeanstalk create-environment \
+  --application-name pickoo-backend \
+  --environment-name pickoo-backend-staging \
+  --solution-stack-name "64bit Amazon Linux 2023 v4.0.0 running Python 3.12" \
+  --option-settings \
+    Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=t3.micro \
+    Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=SingleInstance
+```
+
+**Branch → Environment Mapping:**
+- `develop` branch → deploys to `pickoo-backend-staging`
+- `main` / `production` branches → deploy to `pickoo-backend-env`
+
+
+
 #### Option B: Using AWS CLI (Advanced)
 
 ```bash
@@ -230,15 +268,45 @@ openssl rand -base64 32
 
 ## 🚀 Part 4: Deployment
 
-### Option 1: Automatic Deployment (Push to main)
+### Deployment Workflow Overview
 
+The GitHub Actions workflow automatically deploys to different environments based on the branch:
+
+| Branch | Environment | EB Environment Name | Use Case |
+|--------|-------------|---------------------|----------|
+| `develop` | Staging | `pickoo-backend-staging` | Development testing |
+| `main` | Production | `pickoo-backend-env` | Live production |
+| `production` | Production | `pickoo-backend-env` | Live production |
+
+**Workflow Environment Variables:**
+- `EB_ENVIRONMENT_NAME_PROD`: `pickoo-backend-env` (production)
+- `EB_ENVIRONMENT_NAME_STAGING`: `pickoo-backend-staging` (staging)
+
+The workflow automatically selects the correct environment based on the branch being deployed.
+
+### Option 1: Automatic Deployment (Push to branch)
+
+**Deploy to Staging:**
 ```bash
 # Commit your changes
 git add .
-git commit -m "feat: Ready for AWS deployment"
+git commit -m "feat: Add new feature"
 
-# Push to main branch (triggers deployment)
+# Push to develop branch (triggers staging deployment)
+git push origin develop
+```
+
+**Deploy to Production:**
+```bash
+# Merge develop to main
+git checkout main
+git merge develop
 git push origin main
+```
+
+Or push directly to production branch:
+```bash
+git push origin main:production
 ```
 
 ### Option 2: Manual Deployment (Workflow Dispatch)
