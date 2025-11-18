@@ -3,8 +3,9 @@ Uses environment variables with prefix NEURALENS_. Optional .env file support.
 
 Variables:
     NEURALENS_PROCESSOR_MODE = existing | new
-    NEURALENS_GEMINI_BASE_URL = base URL for nano banana endpoints (default placeholder)
-    NEURALENS_GEMINI_API_KEY = API key / token for authentication
+    NEURALENS_GEMINI_BASE_URL = base URL for Gemini API (default: https://generativelanguage.googleapis.com/)
+    NEURALENS_GEMINI_API_KEY = API key for Gemini authentication
+    NEURALENS_GEMINI_MODEL = Gemini model name (default: gemini-2.0-flash-exp)
     NEURALENS_MONGO_URI = mongodb connection string (e.g. mongodb://localhost:27017/neuralens)
     NEURALENS_JWT_SECRET = secret key for signing JWTs
     NEURALENS_JWT_EXP_MINUTES = access token expiry minutes (default 60)
@@ -16,11 +17,15 @@ except ImportError:  # Fallback if migration not applied yet
 from functools import lru_cache
 
 class Settings(BaseSettings):
-    # 'existing' uses local Pillow stubs; set to 'new' to use external adapter.
-    # Default switched to 'existing' to avoid futile external calls against placeholder domains.
-    processor_mode: str = "existing"  # Use local processing - Gemini quota exceeded
+    # Read from environment NEURALENS_PROCESSOR_MODE or fallback to 'existing'
+    # 'existing' = local Pillow processing, 'new' = external Gemini API
+    processor_mode: str = "existing"
+    
+    # Gemini API configuration - all overridable via environment variables
     gemini_base_url: str = "https://generativelanguage.googleapis.com/"
-    gemini_api_key: str = "AIzaSyDRWGtaK1S30gUJf_TLCBdUklUqVIbNEkc"  # NEVER hard-code real keys; supply via env or secrets manager.
+    gemini_api_key: str = "AIzaSyDRWGtaK1S30gUJf_TLCBdUklUqVIbNEkc"
+    gemini_model: str = "gemini-2.0-flash-exp"  # Model name for all endpoints
+    
     gemini_timeout_seconds: int = 10  # Reduced from 15
     gemini_max_retries: int = 2  # Reduced from 3
     gemini_circuit_threshold: int = 5  # consecutive failures before opening circuit

@@ -20,19 +20,17 @@ from typing import Tuple, Dict
 from config import settings
 from requests.exceptions import SSLError as RequestsSSLError
 
-# Gemini model to use - change here to switch models for all endpoints
-_GEMINI_MODEL = "gemini-2.5-flash-image"
-
 # Map internal tool ids to Gemini API endpoints
 # Using generateContent endpoint with image and text prompts
+# Model name is read from settings.gemini_model (configurable via NEURALENS_GEMINI_MODEL)
 _ENDPOINT_MAP = {
-    "auto_enhance": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
-    "background_removal": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
-    "face_retouch": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
-    "object_eraser": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
-    "sky_replacement": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
-    "super_resolution": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
-    "style_transfer": f"/v1beta/models/{_GEMINI_MODEL}:generateContent",
+    "auto_enhance": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
+    "background_removal": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
+    "face_retouch": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
+    "object_eraser": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
+    "sky_replacement": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
+    "super_resolution": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
+    "style_transfer": lambda: f"/v1beta/models/{settings.gemini_model}:generateContent",
 }
 
 # Advanced Processing Instructions for AI Image Processing Orchestrator
@@ -266,9 +264,10 @@ def _decode_image(payload: bytes, content_type: str) -> Image.Image:
 def process_external(tool_id: str, img: Image.Image) -> Tuple[Image.Image, int]:
     if not settings.use_gemini:
         raise GeminiProcessingError("Gemini external processing invoked but mode != new")
-    path = _ENDPOINT_MAP.get(tool_id)
-    if not path:
+    path_factory = _ENDPOINT_MAP.get(tool_id)
+    if not path_factory:
         raise GeminiProcessingError(f"No external endpoint mapped for tool '{tool_id}'")
+    path = path_factory()  # Call the lambda to get the path with current model
     
     # Add API key to URL as query parameter (Gemini API format)
     url = _full_url(path) + f"?key={settings.gemini_api_key}"
@@ -316,8 +315,9 @@ def process_external(tool_id: str, img: Image.Image) -> Tuple[Image.Image, int]:
     logger = logging.getLogger("gemini_adapter")
     
     logger.info(
-        "Processing %s with Gemini API - Model: gemini-1.5-flash",
-        tool_id
+        "Processing %s with Gemini API - Model: %s",
+        tool_id,
+        settings.gemini_model
     )
     
     while attempts < settings.gemini_max_retries:
