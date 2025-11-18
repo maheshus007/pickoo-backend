@@ -21,10 +21,10 @@ on:
           - production
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-south-1
   EB_APPLICATION_NAME: pickoo-backend
   EB_ENVIRONMENT_NAME_PROD: pickoo-backend-env
-  EB_ENVIRONMENT_NAME_STAGING: pickoo-backend-staging
+  EB_ENVIRONMENT_NAME_STAGING: pickoo-backend-env
 
 jobs:
   test:
@@ -217,9 +217,46 @@ jobs:
         
         aws s3 cp deploy-${{ steps.timestamp.outputs.timestamp }}.zip \
           "s3://${BUCKET_NAME}/${S3_KEY}" \
-          --region ${{ env.AWS_REGION }}
+          --region ${{ env.AWS_REGION }} \
+          --acl bucket-owner-full-control
         
         echo "✅ Upload successful"
+
+    - name: Set S3 bucket policy for Elastic Beanstalk access
+      run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        
+        echo "Setting bucket policy to allow Elastic Beanstalk access..."
+        
+        cat > bucket-policy.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowElasticBeanstalkAccess",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "elasticbeanstalk.amazonaws.com"
+              },
+              "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:ListBucket"
+              ],
+              "Resource": [
+                "arn:aws:s3:::${BUCKET_NAME}/*",
+                "arn:aws:s3:::${BUCKET_NAME}"
+              ]
+            }
+          ]
+        }
+        EOF
+        
+        aws s3api put-bucket-policy \
+          --bucket "${BUCKET_NAME}" \
+          --policy file://bucket-policy.json
+        
+        echo "✅ Bucket policy updated"
 
     - name: Debug S3 bucket location
       run: |
