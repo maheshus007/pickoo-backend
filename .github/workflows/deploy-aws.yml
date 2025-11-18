@@ -169,10 +169,83 @@ jobs:
         aws sts get-caller-identity
         echo "✅ AWS credentials valid"
 
+    - name: Ensure S3 bucket exists
+      run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        
+        if [ -z "$BUCKET_NAME" ]; then
+          echo "❌ Error: EB_S3_BUCKET secret is not set!"
+          echo "Please add EB_S3_BUCKET secret in GitHub repository settings"
+          exit 1
+        fi
+        
+        echo "Checking S3 bucket: $BUCKET_NAME"
+        
+        if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+          echo "Creating S3 bucket: $BUCKET_NAME"
+          aws s3 mb "s3://${BUCKET_NAME}" --region ${{ env.AWS_REGION }}
+          echo "✅ S3 bucket created"
+        else
+          echo "✅ S3 bucket exists"
+        fi
+
     - name: Upload to S3
       run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        S3_KEY="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        
+        echo "Uploading to S3..."
+        echo "Bucket: $BUCKET_NAME"
+        echo "Key: $S3_KEY"
+        echo "Timestamp: ${{ steps.timestamp.outputs.timestamp }}"
+        
         aws s3 cp deploy-${{ steps.timestamp.outputs.timestamp }}.zip \
-          s3://${{ secrets.EB_S3_BUCKET }}/pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip
+          "s3://${BUCKET_NAME}/${S3_KEY}" \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "✅ Upload successful"
+
+    - name: Debug S3 bucket location
+      run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        echo "Getting bucket location..."
+        aws s3api get-bucket-location --bucket "$BUCKET_NAME" --output json || echo "Failed to get bucket location"
+
+    - name: Debug S3 object metadata
+      run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        S3_KEY="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        
+        echo "Getting object metadata..."
+        echo "Bucket: $BUCKET_NAME"
+        echo "Key: $S3_KEY"
+        
+        aws s3api head-object \
+          --bucket "$BUCKET_NAME" \
+          --key "$S3_KEY" \
+          --output json || echo "Failed to get object metadata"
+
+    - name: Debug S3 object ACL
+      run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        S3_KEY="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        
+        echo "Getting object ACL..."
+        aws s3api get-object-acl \
+          --bucket "$BUCKET_NAME" \
+          --key "$S3_KEY" \
+          --output json || echo "Failed to get object ACL"
+
+    - name: Verify S3 object exists
+      run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        S3_KEY="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        
+        echo "Verifying S3 file..."
+        echo "Full S3 path: s3://${BUCKET_NAME}/${S3_KEY}"
+        
+        aws s3 ls "s3://${BUCKET_NAME}/${S3_KEY}"
+        echo "✅ S3 file verified"
 
     - name: Check if Elastic Beanstalk application exists
       id: check-app
@@ -197,20 +270,30 @@ jobs:
 
     - name: Verify S3 file exists
       run: |
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        S3_KEY="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        
         echo "Verifying S3 file..."
-        aws s3 ls s3://${{ secrets.EB_S3_BUCKET }}/pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip
-        echo "✅ S3 file exists"
+        aws s3 ls "s3://${BUCKET_NAME}/${S3_KEY}" --region ${{ env.AWS_REGION }}
+        echo "✅ S3 file verified"
 
     - name: Create Elastic Beanstalk application version
       run: |
-        echo "Creating application version: v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }}"
-        echo "S3 Bucket: ${{ secrets.EB_S3_BUCKET }}"
-        echo "S3 Key: pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        BUCKET_NAME="${{ secrets.EB_S3_BUCKET }}"
+        S3_KEY="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip"
+        VERSION_LABEL="v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }}"
+        
+        echo "Creating application version: $VERSION_LABEL"
+        echo "Application: ${{ env.EB_APPLICATION_NAME }}"
+        echo "S3 Bucket: $BUCKET_NAME"
+        echo "S3 Key: $S3_KEY"
+        echo "Region: ${{ env.AWS_REGION }}"
+        echo "Timestamp: ${{ steps.timestamp.outputs.timestamp }}"
         
         aws elasticbeanstalk create-application-version \
           --application-name ${{ env.EB_APPLICATION_NAME }} \
-          --version-label v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }} \
-          --source-bundle S3Bucket="${{ secrets.EB_S3_BUCKET }}",S3Key="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip" \
+          --version-label "$VERSION_LABEL" \
+          --source-bundle "S3Bucket=${BUCKET_NAME},S3Key=${S3_KEY}" \
           --description "Deployment from GitHub Actions - Commit: ${{ github.sha }}" \
           --region ${{ env.AWS_REGION }}
         
