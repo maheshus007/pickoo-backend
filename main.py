@@ -1,8 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Response
 from fastapi.responses import Response
-from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image, ImageFile
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.base import BaseHTTPMiddleware
+from PIL import Image, ImageFile, ImageOps
 from io import BytesIO
 import traceback
 
@@ -53,8 +54,16 @@ app.add_middleware(
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],  # include OPTIONS for preflight
-    allow_headers=["*"]
+    allow_headers=["*"],
+    max_age=3600,  # Cache preflight for 1 hour
 )
+
+# Middleware to allow larger uploads
+class LimitUploadSizeMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        return await call_next(request)
+
+app.add_middleware(LimitUploadSizeMiddleware)
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
@@ -260,9 +269,15 @@ async def _process(tool_id: str, file: UploadFile, raw: bool = False, response: 
     raw_bytes = await file.read()
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Empty upload")
+    
+    # DISABLED: Server-side compression to preserve original dimensions for compare slider
+    # Client-side compression (flutter_image_compress) already handles size optimization
+    
     try:
         img = Image.open(BytesIO(raw_bytes))
         img.load()  # fully load before threadpool handoff
+        # Apply EXIF orientation to fix rotated images
+        img = ImageOps.exif_transpose(img)
     except Exception:
         # Fallback: use incremental parser (already imported ImageFile at module level)
         try:
@@ -270,6 +285,8 @@ async def _process(tool_id: str, file: UploadFile, raw: bool = False, response: 
             parser.feed(raw_bytes)
             img = parser.close()
             img.load()
+            # Apply EXIF orientation to fix rotated images
+            img = ImageOps.exif_transpose(img)
         except Exception:
             # Last resort: write to temp file and open
             try:
@@ -279,6 +296,8 @@ async def _process(tool_id: str, file: UploadFile, raw: bool = False, response: 
                     tmp.flush()
                     img = Image.open(tmp.name)
                     img.load()
+                    # Apply EXIF orientation to fix rotated images
+                    img = ImageOps.exif_transpose(img)
             except Exception:
                 raise HTTPException(status_code=400, detail=f"Failed to parse image (content_type={file.content_type}, bytes={len(raw_bytes)})")
     try:

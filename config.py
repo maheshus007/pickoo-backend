@@ -18,17 +18,17 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # 'existing' uses local Pillow stubs; set to 'new' to use external adapter.
     # Default switched to 'existing' to avoid futile external calls against placeholder domains.
-    processor_mode: str = "new"
+    processor_mode: str = "existing"  # Use local processing - Gemini quota exceeded
     gemini_base_url: str = "https://generativelanguage.googleapis.com/"
     gemini_api_key: str = "AIzaSyDRWGtaK1S30gUJf_TLCBdUklUqVIbNEkc"  # NEVER hard-code real keys; supply via env or secrets manager.
-    gemini_timeout_seconds: int = 15
-    gemini_max_retries: int = 3
+    gemini_timeout_seconds: int = 10  # Reduced from 15
+    gemini_max_retries: int = 2  # Reduced from 3
     gemini_circuit_threshold: int = 5  # consecutive failures before opening circuit
     gemini_circuit_cooldown_seconds: int = 60  # time before attempting external again
     mongo_uri: str = "mongodb://localhost:27017/neuralens"
     jwt_secret: str = "CHANGE_ME"  # replace via environment
     jwt_exp_minutes: int = 60
-    allow_fallback: bool = True  # When external (Gemini) fails: True=use local fallback, False=raise error
+    allow_fallback: bool = False  # When external (Gemini) fails: True=use local fallback, False=raise error
     gemini_verify_ssl: bool = True  # Disable ONLY for debugging cert issues; insecure if False
     strict_domain_guard: bool = True  # Abort early on known invalid domains / placeholder nano paths
 
