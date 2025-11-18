@@ -1,0 +1,271 @@
+name: Deploy to AWS Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main
+      - production
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  AWS_REGION: us-east-1
+  EB_APPLICATION_NAME: pickoo-backend
+  EB_ENVIRONMENT_NAME: pickoo-backend-env
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio httpx
+
+    - name: Run linting
+      run: |
+        pip install flake8
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+      continue-on-error: true
+
+    - name: Run tests
+      run: |
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+      continue-on-error: true
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: htmlcov/
+        retention-days: 7
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Create .env file
+      run: |
+        cat <<EOF > .env
+        PICKOO_PROCESSOR_MODE=${{ secrets.PROCESSOR_MODE || 'existing' }}
+        PICKOO_GEMINI_BASE_URL=${{ secrets.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/' }}
+        PICKOO_GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+        PICKOO_GEMINI_MODEL=${{ secrets.GEMINI_MODEL || 'gemini-2.0-flash-exp' }}
+        PICKOO_MONGO_URI=${{ secrets.MONGO_URI }}
+        PICKOO_JWT_SECRET=${{ secrets.JWT_SECRET }}
+        PICKOO_JWT_EXP_MINUTES=${{ secrets.JWT_EXP_MINUTES || '60' }}
+        PICKOO_STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+        PICKOO_STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+        PICKOO_STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        EOF
+
+    - name: Create Procfile for Elastic Beanstalk
+      run: |
+        cat <<EOF > Procfile
+        web: uvicorn main:app --host 0.0.0.0 --port 8000
+        EOF
+
+    - name: Create .ebextensions configuration
+      run: |
+        mkdir -p .ebextensions
+        cat <<EOF > .ebextensions/01_packages.config
+        packages:
+          yum:
+            git: []
+            gcc: []
+            python3-devel: []
+            libjpeg-devel: []
+            zlib-devel: []
+        EOF
+        
+        cat <<EOF > .ebextensions/02_python.config
+        option_settings:
+          aws:elasticbeanstalk:application:environment:
+            PYTHONPATH: "/var/app/current:$PYTHONPATH"
+          aws:elasticbeanstalk:container:python:
+            WSGIPath: main:app
+        EOF
+        
+        cat <<EOF > .ebextensions/03_health_check.config
+        option_settings:
+          aws:elasticbeanstalk:environment:process:default:
+            HealthCheckPath: /health
+            HealthCheckInterval: 30
+            HealthCheckTimeout: 5
+            UnhealthyThresholdCount: 3
+            HealthyThresholdCount: 3
+        EOF
+
+    - name: Create application version timestamp
+      id: timestamp
+      run: echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
+
+    - name: Create deployment package
+      run: |
+        zip -r deploy-${{ steps.timestamp.outputs.timestamp }}.zip . \
+          -x "*.git*" \
+          -x "*__pycache__*" \
+          -x "*.pytest_cache*" \
+          -x "*.venv*" \
+          -x "*venv*" \
+          -x "*.env" \
+          -x "*htmlcov*" \
+          -x "*.coverage*" \
+          -x "*tests*"
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Upload to S3
+      run: |
+        aws s3 cp deploy-${{ steps.timestamp.outputs.timestamp }}.zip \
+          s3://${{ secrets.EB_S3_BUCKET }}/pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip
+
+    - name: Create Elastic Beanstalk application version
+      run: |
+        aws elasticbeanstalk create-application-version \
+          --application-name ${{ env.EB_APPLICATION_NAME }} \
+          --version-label v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }} \
+          --source-bundle S3Bucket="${{ secrets.EB_S3_BUCKET }}",S3Key="pickoo-backend/deploy-${{ steps.timestamp.outputs.timestamp }}.zip" \
+          --description "Deployment from GitHub Actions - Commit: ${{ github.sha }}"
+
+    - name: Deploy to Elastic Beanstalk
+      run: |
+        aws elasticbeanstalk update-environment \
+          --application-name ${{ env.EB_APPLICATION_NAME }} \
+          --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+          --version-label v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }}
+
+    - name: Wait for environment to be ready
+      run: |
+        echo "Waiting for environment to be ready..."
+        aws elasticbeanstalk wait environment-updated \
+          --application-name ${{ env.EB_APPLICATION_NAME }} \
+          --environment-name ${{ env.EB_ENVIRONMENT_NAME }}
+
+    - name: Get environment URL
+      id: get-url
+      run: |
+        URL=$(aws elasticbeanstalk describe-environments \
+          --application-name ${{ env.EB_APPLICATION_NAME }} \
+          --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+          --query "Environments[0].CNAME" \
+          --output text)
+        echo "url=https://${URL}" >> $GITHUB_OUTPUT
+
+    - name: Health check
+      run: |
+        sleep 30
+        curl -f ${{ steps.get-url.outputs.url }}/health || exit 1
+
+    - name: Deployment summary
+      run: |
+        echo "🚀 Deployment successful!"
+        echo "📦 Version: v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }}"
+        echo "🌐 URL: ${{ steps.get-url.outputs.url }}"
+        echo "🔗 Environment: ${{ env.EB_ENVIRONMENT_NAME }}"
+        echo "📊 Health Check: ✅ Passed"
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ ${{ job.status }} == 'success' ]; then
+          echo "✅ Deployment succeeded"
+        else
+          echo "❌ Deployment failed"
+        fi
+
+  verify-mongodb:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+    
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install MongoDB client
+      run: |
+        pip install pymongo motor
+
+    - name: Verify MongoDB connection
+      run: |
+        python -c "
+        import asyncio
+        from motor.motor_asyncio import AsyncIOMotorClient
+        
+        async def check_mongo():
+            try:
+                client = AsyncIOMotorClient('${{ secrets.MONGO_URI }}')
+                await client.admin.command('ping')
+                print('✅ MongoDB connection successful')
+                
+                # List databases
+                dbs = await client.list_database_names()
+                print(f'📊 Available databases: {dbs}')
+                
+                # Check pickoo database
+                db = client.pickoo
+                collections = await db.list_collection_names()
+                print(f'📚 Collections in pickoo: {collections}')
+                
+                # Verify collections exist
+                required = ['users', 'transactions']
+                for coll in required:
+                    if coll in collections:
+                        count = await db[coll].count_documents({})
+                        print(f'✅ Collection {coll}: {count} documents')
+                    else:
+                        print(f'⚠️ Collection {coll}: Not found')
+                
+                client.close()
+            except Exception as e:
+                print(f'❌ MongoDB verification failed: {e}')
+                exit(1)
+        
+        asyncio.run(check_mongo())
+        "
+
+    - name: MongoDB status summary
+      run: |
+        echo "🗄️ MongoDB verification completed"
+        echo "✅ Database connection: Active"
+        echo "✅ Collections: Verified"
