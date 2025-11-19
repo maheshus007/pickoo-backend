@@ -105,34 +105,15 @@ jobs:
         PICKOO_STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}
         EOF
 
-    - name: Create Procfile for Elastic Beanstalk
+    - name: Verify Dockerfile exists
       run: |
-        cat <<EOF > Procfile
-        web: gunicorn -w 4 -k uvicorn.workers.UvicornWorker application:application --bind 0.0.0.0:8000 --timeout 120
-        EOF
-
-    - name: Create .ebextensions configuration
-      run: |
-        mkdir -p .ebextensions
-        cat <<EOF > .ebextensions/01_packages.config
-        packages:
-          yum:
-            git: []
-            gcc: []
-            python3-devel: []
-            libjpeg-devel: []
-            zlib-devel: []
-        EOF
-        
-        cat <<EOF > .ebextensions/03_health_check.config
-        option_settings:
-          aws:elasticbeanstalk:environment:process:default:
-            HealthCheckPath: /health
-            HealthCheckInterval: 30
-            HealthCheckTimeout: 5
-            UnhealthyThresholdCount: 3
-            HealthyThresholdCount: 3
-        EOF
+        if [ ! -f "Dockerfile" ]; then
+          echo "❌ ERROR: Dockerfile not found!"
+          exit 1
+        fi
+        echo "✅ Dockerfile found"
+        echo "Contents:"
+        cat Dockerfile
 
     - name: Create application version timestamp
       id: timestamp
@@ -157,6 +138,15 @@ jobs:
         echo "Verifying zip structure..."
         unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | head -30
         
+        echo "Checking for Dockerfile at root..."
+        if unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | grep -q "^.*Dockerfile$"; then
+          echo "✅ Dockerfile found at root level"
+        else
+          echo "❌ ERROR: Dockerfile not at root level!"
+          unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | grep -i docker
+          exit 1
+        fi
+        
         echo "Checking for application.py at root..."
         if unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | grep -q "application.py$"; then
           echo "✅ application.py found at root level"
@@ -171,14 +161,6 @@ jobs:
           echo "✅ requirements.txt found at root level"
         else
           echo "❌ ERROR: requirements.txt not at root level!"
-          exit 1
-        fi
-        
-        echo "Checking for Procfile at root..."
-        if unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | grep -q "Procfile$"; then
-          echo "✅ Procfile found at root level"
-        else
-          echo "❌ ERROR: Procfile not at root level!"
           exit 1
         fi
 
