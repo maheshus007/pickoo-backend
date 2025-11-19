@@ -58,13 +58,14 @@ from config import settings
 
 APP_VERSION = "0.1.0"
 
-app = FastAPI(title="Pickoo AI Backend", version=APP_VERSION)
+# Create FastAPI application with EB-compatible name
+application = FastAPI(title="Pickoo AI Backend", version=APP_VERSION)
 
-# Elastic Beanstalk compatibility - alias for WSGI
-application = app
+# Keep 'app' alias for backward compatibility with existing code
+app = application
 
 # CORS: allow local Flutter web or emulator origins; adjust for production.
-app.add_middleware(
+application.add_middleware(
     CORSMiddleware,
     # Development: permit any localhost origin (random ephemeral Flutter web ports) and 127.0.0.1.
     # WARNING: Do not use allow_origin_regex=".*" in production without auth.
