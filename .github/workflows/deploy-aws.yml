@@ -385,12 +385,13 @@ jobs:
           echo "✅ Environment is already ready"
         fi
 
-    - name: Set Elastic Beanstalk environment variables
+    - name: Deploy to Elastic Beanstalk with environment variables
       run: |
-        echo "Setting environment variables in EB environment..."
+        echo "Deploying version and setting environment variables..."
         aws elasticbeanstalk update-environment \
           --application-name ${{ env.EB_APPLICATION_NAME }} \
           --environment-name ${{ steps.set-env.outputs.env_name }} \
+          --version-label v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }} \
           --option-settings \
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_PROCESSOR_MODE,Value="${{ secrets.PROCESSOR_MODE || 'existing' }}" \
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_GEMINI_BASE_URL,Value="${{ secrets.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/' }}" \
@@ -403,16 +404,7 @@ jobs:
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_STRIPE_PUBLISHABLE_KEY,Value="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_STRIPE_WEBHOOK_SECRET,Value="${{ secrets.STRIPE_WEBHOOK_SECRET }}"
         
-        echo "✅ Environment variables set successfully"
-        echo "Waiting for environment to update..."
-        sleep 30
-
-    - name: Deploy to Elastic Beanstalk
-      run: |
-        aws elasticbeanstalk update-environment \
-          --application-name ${{ env.EB_APPLICATION_NAME }} \
-          --environment-name ${{ steps.set-env.outputs.env_name }} \
-          --version-label v-${{ steps.timestamp.outputs.timestamp }}-${{ github.run_number }}
+        echo "✅ Deployment initiated with environment variables"
 
     - name: Wait for environment to be ready
       run: |
