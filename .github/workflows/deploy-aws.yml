@@ -105,6 +105,66 @@ jobs:
         PICKOO_STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}
         EOF
 
+    - name: Create Dockerrun.aws.json for environment variables
+      run: |
+        cat <<EOF > Dockerrun.aws.json
+        {
+          "AWSEBDockerrunVersion": "1",
+          "Image": {
+            "Name": "pickoo-backend",
+            "Update": "true"
+          },
+          "Ports": [
+            {
+              "ContainerPort": 8000,
+              "HostPort": 8000
+            }
+          ],
+          "Environment": [
+            {
+              "Name": "PICKOO_PROCESSOR_MODE",
+              "Value": "${{ secrets.PROCESSOR_MODE || 'existing' }}"
+            },
+            {
+              "Name": "PICKOO_GEMINI_BASE_URL",
+              "Value": "${{ secrets.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/' }}"
+            },
+            {
+              "Name": "PICKOO_GEMINI_API_KEY",
+              "Value": "${{ secrets.GEMINI_API_KEY }}"
+            },
+            {
+              "Name": "PICKOO_GEMINI_MODEL",
+              "Value": "${{ secrets.GEMINI_MODEL || 'gemini-2.0-flash-exp' }}"
+            },
+            {
+              "Name": "PICKOO_MONGO_URI",
+              "Value": "${{ secrets.MONGO_URI }}"
+            },
+            {
+              "Name": "PICKOO_JWT_SECRET",
+              "Value": "${{ secrets.JWT_SECRET }}"
+            },
+            {
+              "Name": "PICKOO_JWT_EXP_MINUTES",
+              "Value": "${{ secrets.JWT_EXP_MINUTES || '60' }}"
+            },
+            {
+              "Name": "PICKOO_STRIPE_SECRET_KEY",
+              "Value": "${{ secrets.STRIPE_SECRET_KEY }}"
+            },
+            {
+              "Name": "PICKOO_STRIPE_PUBLISHABLE_KEY",
+              "Value": "${{ secrets.STRIPE_PUBLISHABLE_KEY }}"
+            },
+            {
+              "Name": "PICKOO_STRIPE_WEBHOOK_SECRET",
+              "Value": "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+            }
+          ]
+        }
+        EOF
+
     - name: Verify Dockerfile exists
       run: |
         if [ ! -f "Dockerfile" ]; then
@@ -144,6 +204,14 @@ jobs:
         else
           echo "❌ ERROR: Dockerfile not at root level!"
           unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | grep -i docker
+          exit 1
+        fi
+        
+        echo "Checking for Dockerrun.aws.json at root..."
+        if unzip -l deploy-${{ steps.timestamp.outputs.timestamp }}.zip | grep -q "Dockerrun.aws.json$"; then
+          echo "✅ Dockerrun.aws.json found at root level"
+        else
+          echo "❌ ERROR: Dockerrun.aws.json not at root level!"
           exit 1
         fi
         
