@@ -108,7 +108,7 @@ jobs:
     - name: Create Procfile for Elastic Beanstalk
       run: |
         cat <<EOF > Procfile
-        web: uvicorn main:app --host 0.0.0.0 --port 8000
+        web: uvicorn main:application --host 0.0.0.0 --port 8000 --workers 2
         EOF
 
     - name: Create .ebextensions configuration
@@ -127,9 +127,9 @@ jobs:
         cat <<EOF > .ebextensions/02_python.config
         option_settings:
           aws:elasticbeanstalk:application:environment:
-            PYTHONPATH: "/var/app/current:$PYTHONPATH"
+            PYTHONPATH: "/var/app/current:\$PYTHONPATH"
           aws:elasticbeanstalk:container:python:
-            WSGIPath: main:app
+            WSGIPath: main:application
         EOF
         
         cat <<EOF > .ebextensions/03_health_check.config

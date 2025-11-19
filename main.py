@@ -60,6 +60,9 @@ APP_VERSION = "0.1.0"
 
 app = FastAPI(title="Pickoo AI Backend", version=APP_VERSION)
 
+# Elastic Beanstalk compatibility - alias for WSGI
+application = app
+
 # CORS: allow local Flutter web or emulator origins; adjust for production.
 app.add_middleware(
     CORSMiddleware,
