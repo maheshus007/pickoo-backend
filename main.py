@@ -66,9 +66,15 @@ application = app
 # CORS: allow local Flutter web or emulator origins; adjust for production.
 app.add_middleware(
     CORSMiddleware,
-    # Development: permit any localhost origin (random ephemeral Flutter web ports) and 127.0.0.1.
-    # WARNING: Do not use allow_origin_regex=".*" in production without auth.
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+    # Allow localhost for development + any origin for production (consider restricting in prod)
+    # For production, consider using specific origins like your deployed Flutter web app URL
+    allow_origins=[
+        "http://localhost",
+        "http://localhost:*",
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "*",  # Allow all origins - ONLY for testing, restrict in production
+    ],
     allow_credentials=True,
     allow_methods=["*"],  # include OPTIONS for preflight
     allow_headers=["*"],
