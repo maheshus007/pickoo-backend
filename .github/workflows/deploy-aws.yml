@@ -22,9 +22,9 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  EB_APPLICATION_NAME: pickoo-backend
-  EB_ENVIRONMENT_NAME_PROD: pickoo-backend-env
-  EB_ENVIRONMENT_NAME_STAGING: pickoo-backend-env
+  EB_APPLICATION_NAME: pickoo-backend-new
+  EB_ENVIRONMENT_NAME_PROD: Pickoo-backend-new-env
+  EB_ENVIRONMENT_NAME_STAGING: Pickoo-backend-new-env
 
 jobs:
   test:
