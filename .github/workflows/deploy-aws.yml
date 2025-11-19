@@ -364,6 +364,27 @@ jobs:
         
         echo "✅ Application version created successfully"
 
+    - name: Wait for environment to be ready before setting variables
+      run: |
+        echo "Checking if environment is ready..."
+        ENV_STATUS=$(aws elasticbeanstalk describe-environments \
+          --application-name ${{ env.EB_APPLICATION_NAME }} \
+          --environment-names ${{ steps.set-env.outputs.env_name }} \
+          --query "Environments[0].Status" \
+          --output text)
+        
+        echo "Current environment status: $ENV_STATUS"
+        
+        if [ "$ENV_STATUS" != "Ready" ]; then
+          echo "Environment is not ready (status: $ENV_STATUS). Waiting..."
+          aws elasticbeanstalk wait environment-updated \
+            --application-name ${{ env.EB_APPLICATION_NAME }} \
+            --environment-name ${{ steps.set-env.outputs.env_name }}
+          echo "✅ Environment is now ready"
+        else
+          echo "✅ Environment is already ready"
+        fi
+
     - name: Set Elastic Beanstalk environment variables
       run: |
         echo "Setting environment variables in EB environment..."
