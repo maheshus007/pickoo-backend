@@ -1,4 +1,4 @@
-"""Authentication & user management module for NeuraLens.
+"""Authentication & user management module for Pickoo.
 Provides:
   - Mongo connection (motor)
   - User creation & lookup
@@ -66,10 +66,12 @@ async def create_user(db, *, email: str | None, mobile: str | None, password: st
         "plan_code": None,
         "plan_expires_at": None,
         "quota_alerted": False,  # tracks if user has seen quota exhaustion tile
-        # Subscription usage persistence fields (fallback to free plan if plan not purchased)
-        "subscription_plan_id": None,  # e.g. 'free', 'day25', etc.
-        "subscription_purchased_at": None,
+        # Subscription usage persistence fields (all stored in MongoDB)
+        "subscription_plan_id": "free",  # Default to free plan
+        "subscription_purchased_at": datetime.now(timezone.utc),
+        "subscription_expires_at": None,  # Free plan never expires
         "subscription_used_images": 0,
+        "subscription_status_code": "F",  # F = Free tier
     }
     if password:
         doc["password_hash"] = hash_password(password)
@@ -101,7 +103,7 @@ def create_access_token(user_id: str) -> str:
         "sub": user_id,
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_exp_seconds,
-        "iss": "neuralens"
+        "iss": "pickoo"
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
@@ -183,3 +185,41 @@ async def verify_facebook_token(access_token: str) -> Dict[str, Any]:
     if not access_token or len(access_token) < 10:
         raise HTTPException(status_code=400, detail="Invalid Facebook token")
     return {"sub": f"facebook-{access_token[:8]}", "email": None}
+
+# ----- User Deletion -----
+async def delete_user_by_id(db, user_id: str) -> Dict[str, Any]:
+    """Delete a user and all related data from the database.
+    
+    Args:
+        db: Database connection
+        user_id: User ID (can be ObjectId string or regular string)
+        
+    Returns:
+        Dict containing deleted user information
+        
+    Raises:
+        HTTPException: If user not found or deletion fails
+    """
+    from bson import ObjectId
+    
+    # Convert user_id to ObjectId if it's a 24-character hex string
+    query = {"_id": ObjectId(user_id)} if len(user_id) == 24 else {"_id": user_id}
+    
+    # Find user first to return their info
+    user = await db[USER_COLLECTION].find_one(query)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Delete user from users collection
+    result = await db[USER_COLLECTION].delete_one(query)
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=500, detail="Failed to delete user")
+    
+    return {
+        "user_id": str(user["_id"]),
+        "email": user.get("email"),
+        "mobile": user.get("mobile"),
+        "oauth_provider": user.get("oauth_provider"),
+        "deleted_at": datetime.now(timezone.utc)
+    }
