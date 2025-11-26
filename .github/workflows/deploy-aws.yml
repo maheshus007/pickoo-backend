@@ -3,18 +3,16 @@ name: Deploy to AWS Elastic Beanstalk
 on:
   push:
     branches:
-      - main
-      - develop
-      - production
+      - main  # Only trigger on merge to main (when develop PR is merged)
   pull_request:
     branches:
-      - main
+      - main  # Run tests on PRs to main
   workflow_dispatch:
     inputs:
       environment:
         description: 'Deployment environment'
         required: true
-        default: 'staging'
+        default: 'production'
         type: choice
         options:
           - staging
