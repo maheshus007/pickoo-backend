@@ -23,6 +23,7 @@ from schemas import (
     WebhookResponse,
     TransactionRecord,
     TransactionListResponse,
+    UserDeleteResponse,
 )
 from utils import pil_to_base64
 import image_processing as proc
@@ -51,6 +52,7 @@ from auth import (
     verify_google_id_token,
     verify_facebook_token,
     get_current_user,
+    delete_user_by_id,
 )
 from fastapi import Depends
 from pydantic import BaseModel, EmailStr
@@ -203,6 +205,42 @@ async def auth_me(current=Depends(get_current_user)):
         plan_expires_at=plan_expires_at,
         plan_active=plan_active,
         quota_alerted=current.get("quota_alerted"),
+    )
+
+@app.delete("/auth/user/{user_id}", response_model=UserDeleteResponse)
+async def delete_user(user_id: str, db=Depends(get_db), current=Depends(get_current_user)):
+    """Delete a user account and all associated data.
+    
+    Requires authentication. Users can only delete their own account unless they have admin privileges.
+    This is a destructive operation and cannot be undone.
+    
+    Args:
+        user_id: The ID of the user to delete
+        
+    Returns:
+        UserDeleteResponse with deletion confirmation
+        
+    Raises:
+        HTTPException: 403 if user tries to delete another user's account
+        HTTPException: 404 if user not found
+    """
+    # Security check: users can only delete their own account
+    # Add admin role check here if needed: if current.get("role") != "admin" and ...
+    current_user_id = str(current["_id"])
+    if current_user_id != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="Forbidden: You can only delete your own account"
+        )
+    
+    # Delete the user
+    deleted_info = await delete_user_by_id(db, user_id)
+    
+    return UserDeleteResponse(
+        status="success",
+        message=f"User account successfully deleted",
+        user_id=deleted_info["user_id"],
+        deleted_at=deleted_info["deleted_at"].isoformat()
     )
 
 @app.post("/plan/upgrade", response_model=UserInfo)

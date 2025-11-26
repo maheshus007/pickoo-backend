@@ -135,3 +135,9 @@ class TransactionListResponse(BaseModel):
     total_count: int
     page: int
     page_size: int
+
+class UserDeleteResponse(BaseModel):
+    status: str
+    message: str
+    user_id: str
+    deleted_at: str
