@@ -97,12 +97,19 @@ def verify_password(raw: str, hashed: str) -> bool:
 # ----- JWT -----
 
 def create_access_token(user_id: str) -> str:
+    """Create a non-expiring JWT access token.
+
+    Removes the standard `exp` claim to prevent token expiry. This is useful
+    for environments where session continuity is preferred over strict token
+    rotation. Note: For production, consider using refresh tokens instead of
+    completely disabling expiry.
+    """
     if jwt is None:
         raise HTTPException(status_code=500, detail="Dependency 'PyJWT' missing. Install inside venv: pip install PyJWT")
     payload = {
         "sub": user_id,
         "iat": int(time.time()),
-        "exp": int(time.time()) + settings.jwt_exp_seconds,
+        # no 'exp' claim -> non-expiring token
         "iss": "pickoo"
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
@@ -128,8 +135,16 @@ class TokenAuth(HTTPBearer):
         if jwt is None:
             raise HTTPException(status_code=500, detail="Dependency 'PyJWT' missing. Install inside venv: pip install PyJWT")
         try:
-            data = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=["HS256"])
+            # Disable expiry validation to allow non-expiring tokens
+            data = jwt.decode(
+                credentials.credentials,
+                settings.jwt_secret,
+                algorithms=["HS256"],
+                options={"verify_exp": False}
+            )
         except jwt.ExpiredSignatureError:
+            # Even though expiry verification is disabled, keep a fallback
+            # to avoid unexpected behavior if tokens contain exp.
             raise HTTPException(status_code=401, detail="Token expired")
         except jwt.InvalidTokenError:
             raise HTTPException(status_code=401, detail="Invalid token")
