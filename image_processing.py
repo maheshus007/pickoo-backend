@@ -9,6 +9,7 @@ from functools import lru_cache
 import numpy as np
 from config import settings
 from gemini_adapter import process_external, GeminiProcessingError
+from replicate_adapter import process_replicate_gfpgan, ReplicateProcessingError
 
 # Utility no-op fallback
 
@@ -114,7 +115,27 @@ def dispatch(tool_id: str, img: Image.Image):
     """Return (image, meta) where meta contains processor provenance.
     meta keys: processor ('gemini'|'local'|'local-fallback'), attempts, fallback(bool)
     """
-    if settings.use_gemini:
+    mode = (settings.processor_mode or "existing").lower()
+
+    if mode == "replicate":
+        # Replicate GFPGAN only makes sense for face enhancement tools.
+        # For other tools, either fall back to local (if enabled) or reject.
+        if tool_id in {"auto_enhance", "face_retouch"}:
+            try:
+                out, url = process_replicate_gfpgan(img)
+                return out, {"processor": "replicate", "attempts": 1, "fallback": False, "url": url}
+            except ReplicateProcessingError:
+                if not settings.allow_fallback:
+                    raise
+                # else fall through to local
+        else:
+            if not settings.allow_fallback:
+                raise ReplicateProcessingError(
+                    f"Tool '{tool_id}' is not supported in replicate mode. "
+                    "Enable PICKOO_ALLOW_FALLBACK=1 to use local processing for non-face tools."
+                )
+
+    if mode == "new":
         try:
             out, attempts = process_external(tool_id, img)
             return out, {"processor": "gemini", "attempts": attempts, "fallback": False}
@@ -128,6 +149,6 @@ def dispatch(tool_id: str, img: Image.Image):
     _cached(tool_id, key)  # mark seen (placeholder usage)
     out = fn(img)
     # Determine if this is fallback from external attempt
-    external_attempted = settings.use_gemini
+    external_attempted = mode in {"new", "replicate"}
     processor = "local-fallback" if external_attempted else "local"
     return out, {"processor": processor, "attempts": 0, "fallback": external_attempted and settings.allow_fallback}
