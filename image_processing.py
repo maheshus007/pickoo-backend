@@ -10,6 +10,7 @@ import numpy as np
 from config import settings
 from gemini_adapter import process_external, GeminiProcessingError
 from replicate_adapter import process_replicate_gfpgan, ReplicateProcessingError
+from sagemaker_adapter import process_sagemaker_gfpgan, SageMakerProcessingError
 
 # Utility no-op fallback
 
@@ -117,6 +118,23 @@ def dispatch(tool_id: str, img: Image.Image):
     """
     mode = (settings.processor_mode or "existing").lower()
 
+    if mode in {"sage_maker_gfpgan", "sagemaker_gfpgan"}:
+        # SageMaker GFPGAN only makes sense for face enhancement tools.
+        if tool_id in {"auto_enhance", "face_retouch"}:
+            try:
+                out, sm = process_sagemaker_gfpgan(img)
+                return out, {"processor": "sagemaker", "attempts": 1, "fallback": False, **sm}
+            except SageMakerProcessingError:
+                if not settings.allow_fallback:
+                    raise
+                # else fall through to local
+        else:
+            if not settings.allow_fallback:
+                raise SageMakerProcessingError(
+                    f"Tool '{tool_id}' is not supported in sage_maker_gfpgan mode. "
+                    "Enable PICKOO_ALLOW_FALLBACK=1 to use local processing for non-face tools."
+                )
+
     if mode == "replicate":
         # Replicate GFPGAN only makes sense for face enhancement tools.
         # For other tools, either fall back to local (if enabled) or reject.
@@ -149,6 +167,6 @@ def dispatch(tool_id: str, img: Image.Image):
     _cached(tool_id, key)  # mark seen (placeholder usage)
     out = fn(img)
     # Determine if this is fallback from external attempt
-    external_attempted = mode in {"new", "replicate"}
+    external_attempted = mode in {"new", "replicate", "sage_maker_gfpgan", "sagemaker_gfpgan"}
     processor = "local-fallback" if external_attempted else "local"
     return out, {"processor": processor, "attempts": 0, "fallback": external_attempted and settings.allow_fallback}

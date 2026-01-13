@@ -3,7 +3,9 @@ name: Deploy to AWS Elastic Beanstalk
 on:
   push:
     branches:
-      - main  # Only trigger on merge to main (when develop PR is merged)
+      - main  # Production deploys
+      - develop  # Staging deploys (if EB_ENVIRONMENT_NAME_STAGING differs)
+      - production
   pull_request:
     branches:
       - main  # Run tests on PRs to main
@@ -100,6 +102,9 @@ jobs:
         PICKOO_JWT_EXP_MINUTES=${{ secrets.JWT_EXP_MINUTES || '60' }}
         PICKOO_GOOGLE_PAY_MERCHANT_ID=${{ secrets.GOOGLE_PAY_MERCHANT_ID }}
         PICKOO_GOOGLE_PAY_MERCHANT_NAME=${{ secrets.GOOGLE_PAY_MERCHANT_NAME }}
+        # Replicate (GFPGAN hosted)
+        REPLICATE_API_TOKEN=${{ secrets.REPLICATE_API_TOKEN }}
+        PICKOO_REPLICATE_MODEL=${{ secrets.REPLICATE_MODEL || '' }}
         EOF
 
     - name: Verify Dockerfile exists
@@ -398,7 +403,9 @@ jobs:
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_JWT_SECRET,Value="${{ secrets.JWT_SECRET }}" \
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_JWT_EXP_MINUTES,Value="${{ secrets.JWT_EXP_MINUTES || '60' }}" \
             Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_GOOGLE_PAY_MERCHANT_ID,Value="${{ secrets.GOOGLE_PAY_MERCHANT_ID }}" \
-            Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_GOOGLE_PAY_MERCHANT_NAME,Value="${{ secrets.GOOGLE_PAY_MERCHANT_NAME }}"
+            Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_GOOGLE_PAY_MERCHANT_NAME,Value="${{ secrets.GOOGLE_PAY_MERCHANT_NAME }}" \
+            Namespace=aws:elasticbeanstalk:application:environment,OptionName=REPLICATE_API_TOKEN,Value="${{ secrets.REPLICATE_API_TOKEN }}" \
+            Namespace=aws:elasticbeanstalk:application:environment,OptionName=PICKOO_REPLICATE_MODEL,Value="${{ secrets.REPLICATE_MODEL || '' }}"
         
         echo "✅ Deployment initiated with environment variables"
 
