@@ -129,7 +129,9 @@ class TokenAuth(HTTPBearer):
         # (Retain misuse guard for any future accidental direct calls.)
         if isinstance(request, str):  # pragma: no cover - defensive safeguard
             raise HTTPException(status_code=500, detail="Auth dependency misused: expected Request, got str. Use Depends(auth_scheme) instead of calling it directly.")
-        credentials: HTTPAuthorizationCredentials = await super().__call__(request)
+        credentials = await super().__call__(request)
+        if credentials is None:
+            return None
         if credentials.scheme.lower() != "bearer":
             raise HTTPException(status_code=401, detail="Invalid auth scheme")
         if jwt is None:
@@ -153,7 +155,20 @@ class TokenAuth(HTTPBearer):
 
 auth_scheme = TokenAuth()
 
+# Optional auth (does not error if Authorization header is missing).
+optional_auth_scheme = TokenAuth(auto_error=False)
+
 async def get_current_user(db=Depends(get_db), token_data=Depends(auth_scheme)):
+    uid = token_data["sub"]
+    user = await db[USER_COLLECTION].find_one({"_id": __import__("bson").ObjectId(uid)}) if len(uid) == 24 else await db[USER_COLLECTION].find_one({"_id": uid})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+async def get_optional_user(db=Depends(get_db), token_data=Depends(optional_auth_scheme)):
+    if token_data is None:
+        return None
     uid = token_data["sub"]
     user = await db[USER_COLLECTION].find_one({"_id": __import__("bson").ObjectId(uid)}) if len(uid) == 24 else await db[USER_COLLECTION].find_one({"_id": uid})
     if not user:
