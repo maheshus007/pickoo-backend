@@ -52,6 +52,7 @@ from auth import (
     verify_google_id_token,
     verify_facebook_token,
     get_current_user,
+    get_optional_user,
     delete_user_by_id,
 )
 from fastapi import Depends
@@ -102,6 +103,7 @@ async def debug_settings():
     return {
         "processor_mode": settings.processor_mode,
         "use_gemini": settings.use_gemini,
+        "require_auth": settings.require_auth,
         "allow_fallback": settings.allow_fallback,
         "strict_domain_guard": settings.strict_domain_guard,
         "gemini_verify_ssl": settings.gemini_verify_ssl,
@@ -276,11 +278,13 @@ async def process(
     tool_id: str = Query(..., description="Tool id matching registry (e.g. auto_enhance)"),
     file: UploadFile = File(...),
     raw: bool = Query(False, description="Return raw compressed image bytes instead of base64 JSON"),
-    current=Depends(get_current_user),
+    current=Depends(get_optional_user),
 ):
     """Generic processing endpoint allowing dynamic tool selection via query param.
     Optional 'raw=1' query returns binary image (JPEG/PNG) for lower overhead (skip ~33% base64 expansion).
     """
+    if settings.require_auth and current is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     return await _process(tool_id, file, raw=raw)
 
 @app.get("/subscription/status", response_model=SubscriptionStatus)
