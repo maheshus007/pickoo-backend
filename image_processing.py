@@ -7,6 +7,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 import hashlib
 from functools import lru_cache
 import numpy as np
+from typing import Any, Dict
 from config import settings
 from gemini_adapter import process_external, GeminiProcessingError
 from replicate_adapter import process_replicate_gfpgan, ReplicateProcessingError
@@ -112,7 +113,7 @@ def _cached(tool_id: str, key: str) -> Image.Image:
     # lru_cache requires deterministic return, we'll rebuild outside.
     return Image.new("RGB", (1,1))
 
-def dispatch(tool_id: str, img: Image.Image):
+def dispatch(tool_id: str, img: Image.Image, processor_params: Dict[str, Any] | None = None):
     """Return (image, meta) where meta contains processor provenance.
     meta keys: processor ('gemini'|'local'|'local-fallback'), attempts, fallback(bool)
     """
@@ -122,7 +123,7 @@ def dispatch(tool_id: str, img: Image.Image):
         # SageMaker GFPGAN only makes sense for face enhancement tools.
         if tool_id in {"auto_enhance", "face_retouch"}:
             try:
-                out, sm = process_sagemaker_gfpgan(img)
+                out, sm = process_sagemaker_gfpgan(img, params=processor_params)
                 return out, {"processor": "sagemaker", "attempts": 1, "fallback": False, **sm}
             except SageMakerProcessingError:
                 if not settings.allow_fallback:

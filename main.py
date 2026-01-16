@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import Optional
+from typing import Any, Dict, Optional
 from PIL import Image, ImageFile, ImageOps
 from io import BytesIO
 import traceback
@@ -278,6 +278,30 @@ async def process(
     tool_id: str = Query(..., description="Tool id matching registry (e.g. auto_enhance)"),
     file: UploadFile = File(...),
     raw: bool = Query(False, description="Return raw compressed image bytes instead of base64 JSON"),
+    gfpgan_weight: float | None = Query(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="GFPGAN tuning (SageMaker only): 0..1, higher applies stronger restoration.",
+    ),
+    gfpgan_has_aligned: bool | None = Query(
+        None,
+        description="GFPGAN tuning (SageMaker only): set true if input face is already aligned/cropped.",
+    ),
+    gfpgan_only_center_face: bool | None = Query(
+        None,
+        description="GFPGAN tuning (SageMaker only): process only the center-most face.",
+    ),
+    gfpgan_paste_back: bool | None = Query(
+        None,
+        description="GFPGAN tuning (SageMaker only): paste restored face back into original image.",
+    ),
+    gfpgan_max_input_side: int | None = Query(
+        None,
+        ge=1,
+        le=4096,
+        description="GFPGAN tuning (SageMaker only): downscale input so max(width,height) <= this.",
+    ),
     current=Depends(get_optional_user),
 ):
     """Generic processing endpoint allowing dynamic tool selection via query param.
@@ -285,7 +309,20 @@ async def process(
     """
     if settings.require_auth and current is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return await _process(tool_id, file, raw=raw)
+
+    processor_params: Dict[str, Any] = {}
+    if gfpgan_weight is not None:
+        processor_params["weight"] = gfpgan_weight
+    if gfpgan_has_aligned is not None:
+        processor_params["has_aligned"] = gfpgan_has_aligned
+    if gfpgan_only_center_face is not None:
+        processor_params["only_center_face"] = gfpgan_only_center_face
+    if gfpgan_paste_back is not None:
+        processor_params["paste_back"] = gfpgan_paste_back
+    if gfpgan_max_input_side is not None:
+        processor_params["max_input_side"] = gfpgan_max_input_side
+
+    return await _process(tool_id, file, raw=raw, processor_params=processor_params or None)
 
 @app.get("/subscription/status", response_model=SubscriptionStatus)
 async def subscription_status(user_id: str = Query(..., description="User ID to get subscription status for"), db=Depends(get_db)):
@@ -359,7 +396,13 @@ async def subscription_verify_google_play(
     return result
 
 # Generic processor to reduce duplication.
-async def _process(tool_id: str, file: UploadFile, raw: bool = False, response: Response | None = None):
+async def _process(
+    tool_id: str,
+    file: UploadFile,
+    raw: bool = False,
+    response: Response | None = None,
+    processor_params: Dict[str, Any] | None = None,
+):
     # Accept truncated JPEGs rather than failing hard (common with camera uploads)
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     if not file.content_type.startswith("image/"):
@@ -400,7 +443,7 @@ async def _process(tool_id: str, file: UploadFile, raw: bool = False, response: 
                 raise HTTPException(status_code=400, detail=f"Failed to parse image (content_type={file.content_type}, bytes={len(raw_bytes)})")
     try:
         # Offload CPU-bound work
-        out, meta = await run_in_threadpool(proc.dispatch, tool_id, img)
+        out, meta = await run_in_threadpool(proc.dispatch, tool_id, img, processor_params)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Processing error: {e}")
